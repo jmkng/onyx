@@ -25,11 +25,11 @@ jobs:
       - name: Verify deps
         run: go mod verify
 
-      -name: Build
+      - name: Build
         run: go build -v ./...
 
       - name: Vet
-        run go vet -v ./...
+        run: go vet -v ./...
 
       - name: Install staticcheck
         run: go install honnef.co/go/tools/cmd/staticcheck@latest
