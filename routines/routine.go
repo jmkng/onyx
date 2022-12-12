@@ -4,7 +4,7 @@ import (
 	"errors"
 	"io/fs"
 	"os"
-	"path"
+	"path/filepath"
 	"testing"
 )
 
@@ -28,14 +28,14 @@ func AnyExist(dir string, files []string) (string, error) {
 	)
 
 	for _, v := range files {
-		testPath := path.Join(dir, v)
+		testPath := filepath.Join(dir, v)
 
 		info, err := os.Stat(testPath)
 		if os.IsNotExist(err) {
 			resultError = err
 			continue
 		} else {
-			resultPath = path.Join(dir, info.Name())
+			resultPath = filepath.Join(dir, info.Name())
 			resultError = nil
 			break
 		}
@@ -74,12 +74,14 @@ func CreateTemp(t testing.TB, file string) (string, error) {
 		return dir, nil
 	}
 
-	fullPath := path.Join(dir, file)
+	fullPath := filepath.Join(dir, file)
 
-	_, err := os.Create(fullPath)
+	newFile, err := os.Create(fullPath)
 	if err != nil {
 		return "", error
 	}
+
+	newFile.Close()
 
 	return dir, nil
 }

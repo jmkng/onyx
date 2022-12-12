@@ -2,7 +2,7 @@ package routines
 
 import (
 	"os"
-	"path"
+	"path/filepath"
 	"testing"
 
 	"github.com/jmkng/onyx/conf"
@@ -40,7 +40,7 @@ func TestAnyExist(t *testing.T) {
 			t.Fail()
 		}
 
-		want := path.Join(dir, "config.yaml")
+		want := filepath.Join(dir, "config.yaml")
 
 		got, err := searchConf(dir)
 		if err != nil || got != want {
@@ -54,7 +54,7 @@ func TestAnyExist(t *testing.T) {
 			t.Fail()
 		}
 
-		want := path.Join(dir, "config.yml")
+		want := filepath.Join(dir, "config.yml")
 
 		got, err := searchConf(dir)
 		if err != nil || got != want {
@@ -68,7 +68,7 @@ func TestAnyExist(t *testing.T) {
 			t.Fail()
 		}
 
-		want := path.Join(dir, "config.json")
+		want := filepath.Join(dir, "config.json")
 
 		got, err := searchConf(dir)
 		if err != nil || got != want {
@@ -82,7 +82,7 @@ func TestAnyExist(t *testing.T) {
 			t.Fail()
 		}
 
-		want := path.Join(dir, "config.xml")
+		want := filepath.Join(dir, "config.xml")
 
 		got, err := searchConf(dir)
 		if err != nil || got != want {
@@ -96,7 +96,7 @@ func TestAnyExist(t *testing.T) {
 			t.Fail()
 		}
 
-		want := path.Join(dir, "config.toml")
+		want := filepath.Join(dir, "config.toml")
 
 		got, err := searchConf(dir)
 		if os.IsNotExist(err) || got != want {
