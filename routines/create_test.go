@@ -6,15 +6,15 @@ import (
 	"testing"
 )
 
-func TestNewExecute(t *testing.T) {
+func TestCreateExecute(t *testing.T) {
 	t.Run("Config file is created when path argument does not already contain a config.", func(t *testing.T) {
 		dir, err := CreateTemp(t, "")
 		if err != nil {
 			t.Fail()
 		}
 
-		routine := New{
-			Path: dir,
+		routine := Create{
+			path: dir,
 		}
 
 		err = routine.Execute()
@@ -31,8 +31,8 @@ func TestNewExecute(t *testing.T) {
 
 		path := path.Join(dir, "nonExistentDir")
 
-		routine := New{
-			Path: path,
+		routine := Create{
+			path: path,
 		}
 
 		err = routine.Execute()
@@ -47,8 +47,8 @@ func TestNewExecute(t *testing.T) {
 			t.Fail()
 		}
 
-		routine := New{
-			Path: dir,
+		routine := Create{
+			path: dir,
 		}
 
 		err = routine.Execute()
@@ -66,8 +66,8 @@ func TestNewExecute(t *testing.T) {
 		path := path.Join(dir, "config.yaml")
 		fmt.Println(path)
 
-		routine := New{
-			Path: path,
+		routine := Create{
+			path: path,
 		}
 
 		err = routine.Execute()

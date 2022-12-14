@@ -13,12 +13,6 @@ const (
 	DefDirPerm  fs.FileMode = 0755
 )
 
-// Routine describes a type with Execute() and Setup() functions. Setup is
-// optionally used to configure the environment before the main logic in Execute.
-type Routine interface {
-	Execute() error
-}
-
 // AnyExist searches a directory and returns the first of any of the given
 // files that are present. If none are found, an error is returned.
 func AnyExist(dir string, files []string) (string, error) {

@@ -8,14 +8,9 @@ import (
 )
 
 func main() {
-	routine := Parse()
-
-	if routine != nil {
-		err := routine.Execute()
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
+	if err := Init(os.Args[1:]); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
 	}
 
 	track.Report()
