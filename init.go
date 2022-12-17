@@ -4,7 +4,7 @@ import (
 	"flag"
 	"fmt"
 
-	"github.com/jmkng/onyx/routines"
+	"github.com/jmkng/onyx/routine"
 )
 
 type Executable interface {
@@ -30,9 +30,9 @@ func Init(args []string) error {
 	}
 
 	routines := []Executable{
-		routines.NewCreate(),
-		routines.NewBuild(),
-		routines.NewServe(),
+		routine.NewCreate(),
+		routine.NewBuild(),
+		routine.NewServe(),
 	}
 
 	for _, rt := range routines {
