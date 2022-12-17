@@ -15,15 +15,12 @@ var logger = mute.Init(
 	},
 )
 
-// Log is a wrapper for Logger.Send().
-func Log(e ...mute.Event) {
-	logger.Send(e...)
-}
-
-// Event creates and returns a mute.Event.
-func Event(msg string) mute.Event {
-	return mute.Event{
-		Message: msg,
+// Log will create an Event{} for every given string, and pass each Event{} to Send().
+func Log(e ...string) {
+	for _, v := range e {
+		logger.Send(mute.Event{
+			Message: v,
+		})
 	}
 }
 
