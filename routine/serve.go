@@ -1,8 +1,7 @@
-package routines
+package routine
 
 import (
 	"flag"
-	"fmt"
 )
 
 func NewServe() *Serve {
@@ -10,7 +9,7 @@ func NewServe() *Serve {
 		fs: flag.NewFlagSet("serve", flag.ContinueOnError),
 	}
 
-	s.fs.StringVar(&s.path, "path", "", "Path to the project being served.")
+	s.fs.StringVar(&s.path, "path", WdOrPanic(), "Path to the project being served.")
 	s.fs.IntVar(&s.port, "port", 3883, "Port used to host the site.")
 
 	return s
@@ -30,6 +29,5 @@ func (s *Serve) Parse(args []string) error {
 }
 
 func (s *Serve) Execute() error {
-	fmt.Println("Executed serve routine")
 	return nil
 }

@@ -1,4 +1,4 @@
-package routines
+package routine
 
 import (
 	"fmt"
@@ -42,7 +42,7 @@ func TestCreateExecute(t *testing.T) {
 	})
 
 	t.Run("Existing config file will not be overridden.", func(t *testing.T) {
-		dir, err := CreateTemp(t, "config.yaml")
+		dir, err := CreateTemp(t, "onyx.yaml")
 		if err != nil {
 			t.Fail()
 		}
@@ -58,12 +58,12 @@ func TestCreateExecute(t *testing.T) {
 	})
 
 	t.Run("Path to a file cannot be used as path argument.", func(t *testing.T) {
-		dir, err := CreateTemp(t, "config.yaml")
+		dir, err := CreateTemp(t, "onyx.yaml")
 		if err != nil {
 			t.Fail()
 		}
 
-		path := path.Join(dir, "config.yaml")
+		path := path.Join(dir, "onyx.yaml")
 		fmt.Println(path)
 
 		routine := Create{

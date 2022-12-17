@@ -1,4 +1,4 @@
-package routines
+package routine
 
 import (
 	"errors"
@@ -13,8 +13,8 @@ const (
 	DefDirPerm  fs.FileMode = 0755
 )
 
-// AnyExist searches a directory and returns the first of any of the given
-// files that are present. If none are found, an error is returned.
+// AnyExist searches a directory and returns a path to the first of any of
+// the given files. If none are found, an error is returned.
 func AnyExist(dir string, files []string) (string, error) {
 	var (
 		resultPath  string
@@ -37,22 +37,6 @@ func AnyExist(dir string, files []string) (string, error) {
 	}
 
 	return resultPath, resultError
-}
-
-// EvaluatePath resolves a zero-value string to the current directory.
-// If a non-zero string is given, the same value is returned. If the
-// current directory is not accessible, an error is returned.
-func EvaluatePath(path string) (string, error) {
-	if path == "" {
-		wd, err := os.Getwd()
-		if err != nil {
-			return "", errors.New("unable to access current directory")
-		}
-
-		path = wd
-	}
-
-	return path, nil
 }
 
 // createTemp will create a temporary directory for testing. If the file parameter is not an empty string,
@@ -78,4 +62,15 @@ func CreateTemp(t testing.TB, file string) (string, error) {
 	newFile.Close()
 
 	return dir, nil
+}
+
+// WdOrPanic will return the working directory. If the working directory
+// is not available, the program will panic.
+func WdOrPanic() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		panic("failed to access working directory")
+	}
+
+	return wd
 }
