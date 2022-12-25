@@ -1,6 +1,7 @@
 package routine
 
 import (
+	"path/filepath"
 	"testing"
 )
 
@@ -113,36 +114,43 @@ func TestExtract(t *testing.T) {
 
 func TestDestination(t *testing.T) {
 	t.Run("`index` and `tmpl` extensions on index files return the same", func(t *testing.T) {
+		tmpl := filepath.Join("project", "routes", "index.tmpl")
+		html := filepath.Join("project", "routes", "index.html")
+
 		paths := []string{
-			"project/routes/index.tmpl",
-			"project/routes/index.html",
+			tmpl,
+			html,
 		}
+
+		expected := filepath.Join("project", "build", "index.html")
 
 		for _, v := range paths {
 			result := destination(v)
-			if result != "project/build/index.html" {
+			if result != expected {
 				t.Fail()
 			}
 		}
 	})
 
 	t.Run("relative path to index file", func(t *testing.T) {
-		mock := "project/routes/index.tmpl"
+		mock := filepath.Join("project", "routes", "index.tmpl")
 
 		path := destination(mock)
 
-		if path != "project/build/index.html" {
+		expected := filepath.Join("project", "build", "index.html")
+		if path != expected {
 			t.Errorf("invalid result for relative path to index file `%v`\nreceived: %v", mock, path)
 			t.Fail()
 		}
 	})
 
 	t.Run("relative path to group member", func(t *testing.T) {
-		mock := "project/routes/posts/post-one.md"
+		mock := filepath.Join("project", "routes", "posts", "post-one.md")
 
 		path := destination(mock)
 
-		if path != "project/build/post-one/index.html" {
+		expected := filepath.Join("project", "build", "post-one", "index.html")
+		if path != expected {
 			t.Errorf("gave `%v` received `%v`", mock, path)
 			t.Fail()
 		}
