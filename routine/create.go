@@ -12,33 +12,19 @@ import (
 	"github.com/jmkng/onyx/track"
 )
 
-const examplePost = `---
-date: 2022-12-15
----
-content
-`
-
-// TODO: Write example template
-const exampleTemplate = "example template not implemented"
-
-// TODO: Write example index
-const exampleIndex = "example index not implemented"
-
 func NewCreate() *Create {
 	c := &Create{
 		fs: flag.NewFlagSet("create", flag.ContinueOnError),
 	}
 
 	c.fs.StringVar(&c.path, "path", WdOrPanic(), "Path to the desired location of the new project.")
-	c.fs.BoolVar(&c.example, "example", false, "Include additional files for newbies")
 
 	return c
 }
 
 type Create struct {
-	fs      *flag.FlagSet
-	path    string
-	example bool
+	fs   *flag.FlagSet
+	path string
 }
 
 func (c *Create) Name() string {
@@ -50,54 +36,44 @@ func (c *Create) Parse(args []string) error {
 }
 
 func (c *Create) Execute() error {
-	info, stErr := os.Stat(c.path)
+	info, err := os.Stat(c.path)
 
-	if stErr != nil && errors.Is(stErr, os.ErrNotExist) && c.path != "" {
+	if err != nil && errors.Is(err, os.ErrNotExist) && c.path != "" {
 		mkErr := os.Mkdir(c.path, DefDirPerm)
 		if mkErr != nil {
-			return fmt.Errorf("failed to access directory: %v", c.path)
+			return fmt.Errorf("failed to create directory: %v", c.path)
 		}
 
 		track.Log(fmt.Sprintf("created: %v", c.path))
-	} else if stErr != nil && c.path != "" {
-		return fmt.Errorf("failed to access directory: %v", c.path)
+	} else if err != nil && c.path != "" {
+		return fmt.Errorf("failed to access directory, check permission: %v", c.path)
 	}
 
 	if info != nil && !info.IsDir() {
-		return fmt.Errorf("path leads to file, expected directory: %v", c.path)
+		return fmt.Errorf("path leads to file, expected path to new location or directory: %v", c.path)
 	}
 
 	configPath := filepath.Join(c.path, config.YamlName)
 
 	if _, err := os.Stat(configPath); err == nil {
-		return fmt.Errorf("configuration already exists in this directory: %v", configPath)
+		return fmt.Errorf("found existing configuration file, please rename, move or delete: %v", configPath)
 	}
 
-	marConf, err := yaml.Marshal(config.Options{})
-	if err != nil {
-		panic("failed to marshal a default configuration")
+	track.Log(
+		fmt.Sprintf("created: %v", configPath),
+	)
+
+	toTemplates := filepath.Join(c.path, "templates")
+	toRoutes := filepath.Join(c.path, "routes")
+
+	dirs := []string{
+		toTemplates,
+		toRoutes,
+		filepath.Join(c.path, "static"),
+		filepath.Join(c.path, "data"),
 	}
 
-	wrErr := os.WriteFile(configPath, []byte(marConf), DefFilePerm)
-	if wrErr != nil {
-		return fmt.Errorf("failed to access file: %v", configPath)
-	}
-
-	track.Log(fmt.Sprintf("written: %v", configPath))
-
-	if !c.example {
-		return nil
-	}
-
-	postsName := "posts"
-	templatesName := "templates"
-
-	exampleDirs := []string{
-		filepath.Join(c.path, templatesName),
-		filepath.Join(c.path, postsName),
-	}
-
-	for _, v := range exampleDirs {
+	for _, v := range dirs {
 		err := os.Mkdir(v, DefDirPerm)
 		if err != nil {
 			return fmt.Errorf("failed to create directory: %v", v)
@@ -106,34 +82,43 @@ func (c *Create) Execute() error {
 		track.Log(fmt.Sprintf("created: %v", v))
 	}
 
-	indexPath := filepath.Join(c.path, "index.html")
-	postPath := filepath.Join(c.path, postsName, "first-post.md")
-	templatePath := filepath.Join(c.path, templatesName, "layout.tmpl")
+	base := filepath.Join(toTemplates, "base.tmpl")
+	index := filepath.Join(toRoutes, "index.tmpl")
 
-	exampleFiles := map[string]string{
-		exampleIndex:    indexPath,
-		examplePost:     postPath,
-		exampleTemplate: templatePath,
+	conf, err := yaml.Marshal(config.Options{})
+	if err != nil {
+		panic("failed to marshal a default configuration")
 	}
 
-	for data, path := range exampleFiles {
+	err = os.WriteFile(configPath, []byte(conf), DefFilePerm)
+	if err != nil {
+		return fmt.Errorf("failed to access file: %v", configPath)
+	}
+
+	files := map[string]string{
+		base:  "",
+		index: "",
+	}
+
+	for path, data := range files {
 		file, err := os.Create(path)
 		if err != nil {
-			track.Log(fmt.Sprintf("failed to create file: %v", path))
-			continue
+			return fmt.Errorf("failed to create file: %v", path)
 		}
 
-		track.Log(fmt.Sprintf("written: %v", path))
+		defer func() {
+			err = file.Close()
+			if err != nil {
+				panic(fmt.Sprintf("failed to access file: %v", path))
+			}
+		}()
 
 		_, err = file.WriteString(data)
 		if err != nil {
-			track.Log(fmt.Sprintf("failed to write file: %v", indexPath))
+			return fmt.Errorf("failed to write to file: %v", path)
 		}
 
-		err = file.Close()
-		if err != nil {
-			panic(fmt.Sprintf("failed to access file: %v", path))
-		}
+		track.Log(fmt.Sprintf("created: %v", path))
 	}
 
 	return nil
