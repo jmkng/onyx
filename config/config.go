@@ -29,9 +29,10 @@ var Names = []string{
 // Options describes all of the options that might be found in a
 // recognized configuration file.
 type Options struct {
-	Domains  []string `json:"domains" yaml:"domains"`
-	Preserve []string `json:"preserve" yaml:"preserve"`
-	Output   string   `json:"output" yaml:"output"`
+	// These aren't supported yet, so better comment them out for now.
+	// Domains  []string `json:"domains" yaml:"domains"`
+	// Preserve []string `json:"preserve" yaml:"preserve"`
+	Output string `json:"output" yaml:"output"`
 }
 
 // Read will attempt to unmarshal the configuration file at the given path.

@@ -131,123 +131,153 @@ func (b *Build) Execute() error {
 		}()
 	}
 
-	render.Wait() // TODO: (BUG) Write render logic
-
-	// TODO: (BUG) Maybe I should stat these first?
-	toTemplates := filepath.Join(b.path, "templates")
-	toLayout := filepath.Join(toTemplates, "layout.tmpl")
-
-	// err = filepath.WalkDir(toCommon, func(path string, d fs.DirEntry, err error) error {
-	// 	if d.IsDir() {
-	// 		return nil
-	// 	}
-
-	// 	ext := filepath.Ext(path)
-
-	// 	if !d.Type().IsRegular() || ext != ".tmpl" {
-	// 		// TODO: (FEATURE) Log in verbose.
-	// 		track.Log(fmt.Sprintf("found template file of unrecognized type: %v", path))
-	// 		return nil
-	// 	}
-
-	// 	common = append(common, path)
-	// 	return nil
-	// })
-	// if err != nil {
-	// 	panic(err)
-	// }
+	render.Wait()
 
 	renderedChan := make(chan resourceEvent)
-
 	renderedCt := 0
-	renderedCt++
 
-	func(res Resource, out chan resourceEvent) {
-		fmt.Println(res)
-		var request string
+	// TODO: (BUG) templates need to be rendered in here!
+	for i := range renderable {
+		renderedCt++
 
-		// TODO: (BUG) Add extension if user just provides base name of file.
+		var templates []string
 
-		if res.Template != "" {
-			request = filepath.Join(toTemplates, res.Template)
-		} else {
-			if res.Group != "" {
-				request = filepath.Join(toTemplates, res.Group)
-			}
+		toTemplates := filepath.Join(b.path, "templates")
+		toBase := filepath.Join(toTemplates, "base.tmpl")
+
+		_, err = os.Stat(toBase)
+		if err != nil {
+			return fmt.Errorf("missing base template `base.tmpl` in %v", toTemplates)
 		}
 
-		if request != "" {
-			_, err := os.Stat(request)
-			if err != nil {
-				renderedChan <- resourceEvent{
-					Res: res,
-					Err: fmt.Errorf("unable to locate template `%v` requested by: %v", res.Template, res.Path),
+		templates = append(templates, toBase)
+
+		var base []string
+		err = filepath.WalkDir(toTemplates, func(path string, d fs.DirEntry, err error) error {
+			if d.IsDir() {
+				if path == toTemplates {
+					return nil
 				}
 
-				return
+				return filepath.SkipDir
 			}
+
+			if !d.IsDir() && d.Type().IsRegular() {
+				pathBase := filepath.Base(path)
+
+				segments := strings.Split(pathBase, ".")
+				if len(segments) < 2 {
+					return nil
+				}
+
+				prefix := strings.HasPrefix(segments[0], "base_")
+				if !prefix && segments[1] == "tmpl" {
+					return nil
+				}
+
+				base = append(base, path)
+			}
+
+			return nil
+		})
+		if err != nil {
+			panic(err)
 		}
 
-		caser := cases.Title(language.English)
+		templates = append(templates, base...)
 
-		context := make(map[string]any)
+		go func(res Resource, out chan resourceEvent) {
+			var request string
 
-		context["Content"] = res.Transformed
+			// TODO: (FEATURE) Allow multiple templates to be specified and joined in context.
+			// TODO: (BUG) Add extension if user just provides base name of file.
+			if res.Template != "" {
+				request = filepath.Join(toTemplates, res.Template)
+			} else {
+				if res.Group != "" {
+					request = filepath.Join(toTemplates, res.Group)
+				}
+			}
 
-		for k, v := range injectable.Data {
-			context[k] = v
-		}
+			if request != "" {
+				_, err := os.Stat(request)
+				if err != nil {
+					renderedChan <- resourceEvent{
+						Res: res,
+						Err: fmt.Errorf("unable to locate template `%v` requested by: %v", res.Template, res.Path),
+					}
 
-		if len(res.Data) > 0 {
+					return
+				}
+
+				templates = append(templates, request)
+			}
+
+			caser := cases.Title(language.English)
+
+			context := make(map[string]any)
+			context["Content"] = res.Transformed
+
+			for k, v := range injectable.Data {
+				context[k] = v
+			}
+
 			for k, v := range res.Data {
 				title := caser.String(k)
 				context[title] = v
 			}
+
+			tmpl, err := template.ParseFiles(templates...)
+			if err != nil {
+				renderedChan <- resourceEvent{
+					Res: res,
+					Err: fmt.Errorf("failed to parse templates for resource: %v", res.Path),
+				}
+
+				return
+			}
+
+			var buf bytes.Buffer
+			err = tmpl.Execute(&buf, context)
+			if err != nil {
+				panic(err)
+			}
+
+			res.Rendered = buf.String()
+
+			renderedChan <- resourceEvent{
+				Res: res,
+				Err: nil,
+			}
+		}(renderable[i], renderedChan)
+	}
+
+	for i := 0; i < renderedCt; i++ {
+		event := <-renderedChan
+		if event.Err != nil {
+			return fmt.Errorf("failed to render a resource: %v", event.Res.Path)
 		}
 
-		var list []string
+		parent := filepath.Dir(event.Res.Destination)
 
-		if request != "" {
-			list = []string{toLayout, request}
-		} else {
-			list = []string{toLayout}
-		}
-
-		tmpl, err := template.ParseFiles(list...)
-		// template, err := template.ParseFiles(list...)
+		_, err = os.Stat(parent)
 		if err != nil {
-			panic(err)
-			// renderedChan <- resourceEvent{
-			// 	Res: res,
-			// 	Err: fmt.Errorf("failed to parse templates for resource: %v", res.Path),
-			// }
+			if errors.Is(err, os.ErrNotExist) {
+				err = os.MkdirAll(parent, DefDirPerm)
+				if err != nil {
+					return fmt.Errorf("unable to create directory: %v", parent)
+				}
+			} else {
+				// TODO: (BUG) Remove temporary else block and fake error
+				return fmt.Errorf("other err: %v", parent)
+			}
 		}
 
-		bonk := tmpl.DefinedTemplates()
-		fmt.Println(bonk)
-
-		var buf bytes.Buffer
-
-		err = tmpl.ExecuteTemplate(&buf, "layout.tmpl", context)
+		err = os.WriteFile(event.Res.Destination, []byte(event.Res.Rendered), DefFilePerm)
 		if err != nil {
-			panic(err)
+			return fmt.Errorf("unable to write file: %v", event.Res.Destination)
 		}
-
-		res.Rendered = buf.String()
-
-		renderedChan <- resourceEvent{
-			Res: res,
-			Err: nil,
-		}
-
-	}(renderable[1], renderedChan)
-
-	// for i := 0; i < rend  eredCt; i++ {
-	<-renderedChan
-	// event := <-renderedChan
-	// fmt.Println(event.Res.Rendered)
-	// fmt.Println("\n\n\n\n\n")
-	// }
+	}
 
 	return nil
 }
@@ -302,7 +332,7 @@ func NewResource(filePath string) (Resource, error) {
 			return Resource{}, err
 		}
 
-		res.Transformed = buf.String()
+		res.Transformed = template.HTML(strings.TrimSpace(buf.String()))
 
 		// TODO: Promote values
 		if template, ok := res.Data["template"]; ok {
@@ -315,7 +345,7 @@ func NewResource(filePath string) (Resource, error) {
 			delete(res.Data, "date")
 		}
 	} else {
-		res.Transformed = asStr
+		res.Transformed = template.HTML(asStr)
 	}
 
 	// TODO: (BUG) Finish initializing resource.
@@ -327,7 +357,7 @@ type Resource struct {
 	Destination string
 	Ext         string
 	Raw         string
-	Transformed string
+	Transformed template.HTML
 	Rendered    string
 	Group       string
 	Template    string
@@ -464,7 +494,7 @@ func destination(path string) string {
 	var root string
 
 	if config.State.Output != "" {
-		root = config.State.Output
+		root = filepath.Join(first, config.State.Output)
 	} else {
 		if filepath.IsAbs(path) {
 			wd, err := os.Getwd()
