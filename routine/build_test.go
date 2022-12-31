@@ -1,16 +1,24 @@
 package routine
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
 
 func TestIsIgnored(t *testing.T) {
 	t.Run("hidden unix files are ignored", func(t *testing.T) {
-		ignored := isIgnored(".test")
+		files := []string{
+			".test",
+			"path/to/.test",
+		}
 
-		if !ignored {
-			t.Fail()
+		for _, v := range files {
+			ignored := isIgnored(v)
+
+			if !ignored {
+				t.Fail()
+			}
 		}
 	})
 }
@@ -95,13 +103,13 @@ func TestIsComplex(t *testing.T) {
 	})
 }
 
-func TestExtract(t *testing.T) {
+func TestPull(t *testing.T) {
 	t.Run("YAML is recognized and extracted", func(t *testing.T) {
 		mock := "---\ntitle: test\nauthor: test\n---body"
 
-		head, body, err := extract(mock)
+		head, body, err := pull(mock)
 		if err != nil {
-			t.Logf("extract returned err: %v", err)
+			t.Logf("pull returned err: %v", err)
 			t.FailNow()
 		}
 
@@ -112,32 +120,48 @@ func TestExtract(t *testing.T) {
 	})
 }
 
-func TestDestination(t *testing.T) {
+func TestOut(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		panic(err)
+	}
+
 	t.Run("`index` and `tmpl` extensions on index files return the same", func(t *testing.T) {
-		tmpl := filepath.Join("project", "routes", "index.tmpl")
-		html := filepath.Join("project", "routes", "index.html")
+		tmpl := filepath.Join("routes", "index.tmpl")
+		html := filepath.Join("routes", "index.html")
 
 		paths := []string{
 			tmpl,
 			html,
 		}
 
-		expected := filepath.Join("project", "build", "index.html")
+		expected := filepath.Join(wd, "build", "index.html")
 
 		for _, v := range paths {
-			result := destination(v)
+			path, err := out(wd, v)
+			if err != nil {
+				t.Log(err)
+				t.FailNow()
+			}
+
+			result := path
 			if result != expected {
+				t.Logf("expected %v, got %v", expected, result)
 				t.Fail()
 			}
 		}
 	})
 
 	t.Run("relative path to index file", func(t *testing.T) {
-		mock := filepath.Join("project", "routes", "index.tmpl")
+		mock := filepath.Join("routes", "index.tmpl")
 
-		path := destination(mock)
+		path, err := out(wd, mock)
+		if err != nil {
+			t.Log(err)
+			t.FailNow()
+		}
 
-		expected := filepath.Join("project", "build", "index.html")
+		expected := filepath.Join(wd, "build", "index.html")
 		if path != expected {
 			t.Errorf("invalid result for relative path to index file `%v`\nreceived: %v", mock, path)
 			t.Fail()
@@ -145,11 +169,15 @@ func TestDestination(t *testing.T) {
 	})
 
 	t.Run("relative path to group member", func(t *testing.T) {
-		mock := filepath.Join("project", "routes", "posts", "post-one.md")
+		mock := filepath.Join("routes", "posts", "post-one.md")
 
-		path := destination(mock)
+		path, err := out(wd, mock)
+		if err != nil {
+			t.Log(err)
+			t.FailNow()
+		}
 
-		expected := filepath.Join("project", "build", "post-one", "index.html")
+		expected := filepath.Join(wd, "build", "posts", "post-one", "index.html")
 		if path != expected {
 			t.Errorf("gave `%v` received `%v`", mock, path)
 			t.Fail()

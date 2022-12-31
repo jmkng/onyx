@@ -20,18 +20,14 @@ import (
 	"golang.org/x/text/language"
 )
 
-var (
-	ErrNoData error = errors.New("no data in file")
-)
-
 func NewBuild() *Build {
-	b := &Build{
+	routine := &Build{
 		fs: flag.NewFlagSet("build", flag.ContinueOnError),
 	}
 
-	b.fs.StringVar(&b.path, "path", WdOrPanic(), "Path to the project being built.")
+	routine.fs.StringVar(&routine.path, "path", WdOrPanic(), "Path to the project being built.")
 
-	return b
+	return routine
 }
 
 type Build struct {
@@ -39,37 +35,25 @@ type Build struct {
 	path string
 }
 
-func (b *Build) Name() string {
-	return b.fs.Name()
+func (routine *Build) Name() string {
+	return routine.fs.Name()
 }
 
-func (b *Build) Parse(args []string) error {
-	return b.fs.Parse(args)
+func (routine *Build) Parse(args []string) error {
+	return routine.fs.Parse(args)
 }
 
-func (b *Build) Execute() error {
-	_, err := os.Stat(b.path)
+func (routine *Build) Execute() error {
+	err := Setup(routine.path)
 	if err != nil {
-		return fmt.Errorf("cannot access directory: %v", b.path)
+		return err
 	}
 
-	configPath, err := config.SearchConf(b.path)
-	if err != nil {
-		return fmt.Errorf("configuration file onyx.[yaml|yml|json] missing: %v", b.path)
-	}
+	routes := filepath.Join(routine.path, "routes")
 
-	err = config.Read(configPath)
-	if err != nil {
-		return fmt.Errorf("configuration file `%v`  is malformed", configPath)
-	}
-
-	routes := filepath.Join(b.path, "routes")
-
-	// TODO: (FEATURE) If config specifies a "domains" key, look for those folders instead
-	// of a "routes" directory.
 	_, err = os.Stat(routes)
 	if err != nil {
-		return fmt.Errorf("project has no routes: %v", b.path)
+		return fmt.Errorf("project has no routes: %v", routine.path)
 	}
 
 	resourceChan := make(chan resourceEvent)
@@ -97,11 +81,11 @@ func (b *Build) Execute() error {
 		resourceCt++
 
 		go func() {
-			res, err := NewResource(path)
+			res, err := newResource(routine.path, path)
 
 			resourceChan <- resourceEvent{
-				Res: res,
-				Err: err,
+				res: res,
+				err: err,
 			}
 		}()
 
@@ -114,19 +98,19 @@ func (b *Build) Execute() error {
 	var render sync.WaitGroup
 	render.Add(resourceCt)
 
-	var injectable Injectable
-	var renderable []Resource
+	var injectable injectable
+	var renderable []resource
 
 	for i := 0; i < resourceCt; i++ {
 		event := <-resourceChan
-		if event.Err != nil {
-			return event.Err
+		if event.err != nil {
+			return event.err
 		}
 
-		renderable = append(renderable, event.Res)
+		renderable = append(renderable, event.res)
 
 		go func() {
-			injectable.Absorb(event.Res)
+			injectable.absorb(event.res)
 			render.Done()
 		}()
 	}
@@ -136,13 +120,12 @@ func (b *Build) Execute() error {
 	renderedChan := make(chan resourceEvent)
 	renderedCt := 0
 
-	// TODO: (BUG) templates need to be rendered in here!
 	for i := range renderable {
 		renderedCt++
 
 		var templates []string
 
-		toTemplates := filepath.Join(b.path, "templates")
+		toTemplates := filepath.Join(routine.path, "templates")
 		toBase := filepath.Join(toTemplates, "base.tmpl")
 
 		_, err = os.Stat(toBase)
@@ -154,6 +137,14 @@ func (b *Build) Execute() error {
 
 		var base []string
 		err = filepath.WalkDir(toTemplates, func(path string, d fs.DirEntry, err error) error {
+			if isIgnored(path) {
+				if d.IsDir() {
+					return filepath.SkipDir
+				} else {
+					return nil
+				}
+			}
+
 			if d.IsDir() {
 				if path == toTemplates {
 					return nil
@@ -164,13 +155,14 @@ func (b *Build) Execute() error {
 
 			if !d.IsDir() && d.Type().IsRegular() {
 				pathBase := filepath.Base(path)
-
 				segments := strings.Split(pathBase, ".")
+
 				if len(segments) < 2 {
 					return nil
 				}
 
 				prefix := strings.HasPrefix(segments[0], "base_")
+
 				if !prefix && segments[1] == "tmpl" {
 					return nil
 				}
@@ -184,18 +176,18 @@ func (b *Build) Execute() error {
 			panic(err)
 		}
 
+		caser := cases.Title(language.English)
+
 		templates = append(templates, base...)
 
-		go func(res Resource, out chan resourceEvent) {
+		go func(res resource, out chan resourceEvent) {
 			var request string
 
-			// TODO: (FEATURE) Allow multiple templates to be specified and joined in context.
-			// TODO: (BUG) Add extension if user just provides base name of file.
-			if res.Template != "" {
-				request = filepath.Join(toTemplates, res.Template)
+			if res.template != "" {
+				request = filepath.Join(toTemplates, res.template)
 			} else {
-				if res.Group != "" {
-					request = filepath.Join(toTemplates, res.Group)
+				if res.group != "" {
+					request = filepath.Join(toTemplates, res.group)
 				}
 			}
 
@@ -203,8 +195,8 @@ func (b *Build) Execute() error {
 				_, err := os.Stat(request)
 				if err != nil {
 					renderedChan <- resourceEvent{
-						Res: res,
-						Err: fmt.Errorf("unable to locate template `%v` requested by: %v", res.Template, res.Path),
+						res: res,
+						err: fmt.Errorf("unable to locate template `%v` requested by: %v", res.template, res.path),
 					}
 
 					return
@@ -213,16 +205,14 @@ func (b *Build) Execute() error {
 				templates = append(templates, request)
 			}
 
-			caser := cases.Title(language.English)
-
 			context := make(map[string]any)
-			context["Content"] = res.Transformed
+			context["Content"] = res.transformed
 
 			for k, v := range injectable.Data {
 				context[k] = v
 			}
 
-			for k, v := range res.Data {
+			for k, v := range res.data {
 				title := caser.String(k)
 				context[title] = v
 			}
@@ -230,8 +220,8 @@ func (b *Build) Execute() error {
 			tmpl, err := template.ParseFiles(templates...)
 			if err != nil {
 				renderedChan <- resourceEvent{
-					Res: res,
-					Err: fmt.Errorf("failed to parse templates for resource: %v", res.Path),
+					res: res,
+					err: fmt.Errorf("failed to parse templates for resource: %v", res.path),
 				}
 
 				return
@@ -240,25 +230,29 @@ func (b *Build) Execute() error {
 			var buf bytes.Buffer
 			err = tmpl.Execute(&buf, context)
 			if err != nil {
-				panic(err)
+				renderedChan <- resourceEvent{
+					res: resource{},
+					err: fmt.Errorf("encountered a problem while executing template:\n%v", err.Error()),
+				}
+				return
 			}
 
-			res.Rendered = buf.String()
+			res.rendered = buf.String()
 
 			renderedChan <- resourceEvent{
-				Res: res,
-				Err: nil,
+				res: res,
+				err: nil,
 			}
 		}(renderable[i], renderedChan)
 	}
 
 	for i := 0; i < renderedCt; i++ {
 		event := <-renderedChan
-		if event.Err != nil {
-			return fmt.Errorf("failed to render a resource: %v", event.Res.Path)
+		if event.err != nil {
+			return event.err
 		}
 
-		parent := filepath.Dir(event.Res.Destination)
+		parent := filepath.Dir(event.res.destination)
 
 		_, err = os.Stat(parent)
 		if err != nil {
@@ -268,155 +262,208 @@ func (b *Build) Execute() error {
 					return fmt.Errorf("unable to create directory: %v", parent)
 				}
 			} else {
-				// TODO: (BUG) Remove temporary else block and fake error
-				return fmt.Errorf("other err: %v", parent)
+				panic(err)
 			}
 		}
 
-		err = os.WriteFile(event.Res.Destination, []byte(event.Res.Rendered), DefFilePerm)
+		err = os.WriteFile(event.res.destination, []byte(event.res.rendered), DefFilePerm)
 		if err != nil {
-			return fmt.Errorf("unable to write file: %v", event.Res.Destination)
+			return fmt.Errorf("unable to write file: %v", event.res.destination)
+		}
+	}
+
+	var static []string
+
+	toStatic := filepath.Join(routine.path, "static")
+	err = filepath.WalkDir(toStatic, func(path string, d fs.DirEntry, err error) error {
+		if isIgnored(path) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			} else {
+				return nil
+			}
+		}
+
+		if d.IsDir() {
+			return nil
+		}
+
+		if !d.IsDir() && d.Type().IsRegular() {
+			static = append(static, path)
+		}
+
+		return nil
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	for _, v := range static {
+		dest, err := out(routine.path, v)
+		if err != nil {
+			panic(err)
+		}
+
+		parent := filepath.Dir(dest)
+
+		err = os.MkdirAll(parent, DefDirPerm)
+		if err != nil {
+			return fmt.Errorf("unable to create directory: %v", parent)
+		}
+
+		bytes, err := os.ReadFile(v)
+		if err != nil {
+			return fmt.Errorf("unable to read file: %v", v)
+		}
+
+		err = os.WriteFile(dest, bytes, DefFilePerm)
+		if err != nil {
+			return fmt.Errorf("unable to write file: %v", dest)
 		}
 	}
 
 	return nil
 }
 
-// NewResource creates and initializes a new Resource from the file at filePath.
-func NewResource(filePath string) (Resource, error) {
-	raw, err := os.ReadFile(filePath)
-	if err != nil {
-		return Resource{}, err
+// pull will find data within a file and extract it, returning the data and
+// content as separate strings. An error is returned if no data exists in the file,
+// or the data is malformed in some way.
+func pull(data string) (string, string, error) {
+	if data[0:3] != "---" {
+		return "", "", errors.New("no data in file")
 	}
 
-	ext := filepath.Ext(filePath)
-	asStr := string(raw)
+	firstEnd := 3
+	secondStart := strings.Index(data[3:], "---")
+	secondEnd := secondStart + 3
 
-	// TODO: (BUG) Calculate a path for the file.
-	destination(filePath)
+	head := data[firstEnd:secondEnd]
+	body := data[(secondEnd + 3):]
 
-	res := Resource{
-		Path:        filePath,
-		Destination: destination(filePath),
-		Ext:         ext,
-		Raw:         asStr,
-	}
+	return head, body, nil
+}
 
-	sep := string(filepath.Separator)
-	segments := strings.Split(filePath, sep)
+// diff will determine the difference between two paths, returning the relative
+// part of a path from the first to second.
+func diff(root, path string) (string, error) {
+	var project string
 
-	if len(segments) > 3 {
-		parent := filepath.Dir(filePath)
-		group := filepath.Base(parent)
-		res.Group = group
-	}
-
-	if isComplex(asStr) {
-		rawData, rawBody, err := extract(asStr)
+	// normalize root
+	if !filepath.IsAbs(root) {
+		result, err := filepath.Abs(root)
 		if err != nil {
-			return Resource{}, fmt.Errorf("unable to carve file: %v", filePath)
+			return "", err
 		}
 
-		// TODO: (FEATURE) Detect type of metadata. We assume YAML here.
-		yaml.Unmarshal(
-			[]byte(rawData), &res.Data,
-		)
-
-		var buf bytes.Buffer
-		switch ext {
-		case ".md":
-			err = md.Unmarshal([]byte(rawBody), &buf)
-		}
-
-		if err != nil {
-			return Resource{}, err
-		}
-
-		res.Transformed = template.HTML(strings.TrimSpace(buf.String()))
-
-		// TODO: Promote values
-		if template, ok := res.Data["template"]; ok {
-			res.Template = template
-			delete(res.Data, "template")
-		}
-
-		if date, ok := res.Data["date"]; ok {
-			res.Date = date
-			delete(res.Data, "date")
-		}
+		project = result
 	} else {
-		res.Transformed = template.HTML(asStr)
+		project = root
 	}
 
-	// TODO: (BUG) Finish initializing resource.
-	return res, nil
+	if !filepath.IsAbs(path) {
+		result, err := filepath.Abs(path)
+		if err != nil {
+			return "", err
+		}
+
+		path = result
+	}
+
+	projSegments := strings.Split(project, string(filepath.Separator))
+	pathSegments := strings.Split(path, string(filepath.Separator))
+
+	projLen := len(projSegments)
+	pathLen := len(pathSegments)
+
+	if projLen > pathLen {
+		return "", errors.New("path is not inside of project")
+	}
+
+	start := pathLen - (pathLen - projLen)
+
+	var result []string
+
+	for i := start; i < pathLen; i++ {
+		result = append(result, pathSegments[i])
+	}
+
+	return filepath.Join(result...), nil
 }
 
-type Resource struct {
-	Path        string
-	Destination string
-	Ext         string
-	Raw         string
-	Transformed template.HTML
-	Rendered    string
-	Group       string
-	Template    string
-	Date        string
-	Data        map[string]string
-}
+// out will examine the original path to a file and determine where it should be placed.
+func out(root, path string) (string, error) {
+	var resource string
 
-type Injectable struct {
-	Data map[string]any
-	// Data map[string][]map[string]any
-	mu sync.Mutex
-}
+	// normalize path to resource
+	if !filepath.IsAbs(path) {
+		full, err := filepath.Abs(path)
+		if err != nil {
+			return "", errors.New("unable to determine full path to resource")
+		}
 
-// Absorb will add a resource's data to an injectable context that can be used
-// to render templates, and it is thread safe.
-func (i *Injectable) Absorb(res Resource) {
-	if res.Group == "" {
-		return
+		resource = full
+	} else {
+		resource = path
 	}
 
-	caser := cases.Title(language.English)
+	var output string
 
-	member := make(map[string]any)
-
-	member["Content"] = res.Transformed
-	member["Date"] = res.Date
-
-	for k, v := range res.Data {
-		keyTitle := caser.String(k)
-		member[keyTitle] = v
+	// normalize output directory
+	if config.State.Output != "" {
+		output = config.State.Output
+	} else {
+		output = "build"
 	}
 
-	groupTitle := caser.String(res.Group)
-
-	i.mu.Lock()
-	defer i.mu.Unlock()
-
-	if i.Data == nil {
-		i.Data = make(map[string]any)
+	// find relative path from project root to resource
+	relative, err := diff(root, resource)
+	if err != nil {
+		return "", errors.New("unable to determine difference path to resource")
 	}
 
-	if _, ok := i.Data[groupTitle]; !ok {
-		i.Data[groupTitle] = []map[string]any{}
+	sep := filepath.Separator
+	segments := strings.Split(relative, string(sep))
+
+	// relative path segments are examined
+	switch segments[0] {
+	case "routes":
+		// last segment
+		last := segments[len(segments)-1]
+		switch last {
+		case "index.html", "index.tmpl":
+			lastIndex := len(segments) - 1
+			allBetween := segments[1:lastIndex]
+			joined := filepath.Join(allBetween...)
+			return filepath.Join(root, output, joined, "index.html"), nil
+		default:
+			lastIndex := len(segments) - 1
+			last := segments[len(segments)-1]
+			allBetween := segments[1:lastIndex]
+			split := strings.Split(last, ".")
+
+			if len(split) < 2 {
+				return "", fmt.Errorf("resource is missing a valid extension: %v", path)
+			}
+
+			joined := filepath.Join(allBetween...)
+			return filepath.Join(root, output, joined, split[0], "index.html"), nil
+		}
+	case "static":
+		return filepath.Join(root, output, relative), nil
+	default:
+		panic(
+			fmt.Sprintf("received call to determine output path for unexpected section in project: %v", segments[0]),
+		)
 	}
-
-	i.Data[groupTitle] = append(i.Data[groupTitle].([]map[string]any), member)
-}
-
-// ResourceEvent is a struct passed through channels that may contain a Resource.
-type resourceEvent struct {
-	Res Resource
-	Err error
 }
 
 // isIgnored will return true if the path leads to a file that is ignored.
 func isIgnored(path string) bool {
 	result := false
 
-	if strings.HasPrefix(path, ".") {
+	base := filepath.Base(path)
+
+	if strings.HasPrefix(base, ".") {
 		result = true
 	}
 
@@ -446,7 +493,6 @@ func isComplex(data string) bool {
 
 	found := 0
 
-	// This should iterate over the lines in argument 'data' until the expected delimiters are found.
 	for _, v := range partitions {
 		if found == 2 {
 			break
@@ -462,59 +508,134 @@ func isComplex(data string) bool {
 	return found == 2
 }
 
-// extract will find data within a file and extract it, returning the data and
-// content as separate strings. An error is returned if no data exists in the file,
-// or the data is malformed in some way.
-func extract(data string) (string, string, error) {
-	if data[0:3] != "---" {
-		return "", "", ErrNoData
-	}
-
-	firstEnd := 3
-	secondStart := strings.Index(data[3:], "---")
-	secondEnd := secondStart + 3
-
-	head := data[firstEnd:secondEnd]
-	body := data[(secondEnd + 3):]
-
-	return head, body, nil
+// injectable is a data structure used to hold the key/value pairs from all
+// resources in a project.
+type injectable struct {
+	Data map[string]any
+	mu   sync.Mutex
 }
 
-// destination will return an output path for a resource. The returned path
-// is based on the name and original location of the resource.
-func destination(path string) string {
-	var result string
+// absorb will add a resource's data to an injectable context that can be used
+// to render templates, and it is thread safe.
+func (i *injectable) absorb(res resource) {
+	if res.group == "" {
+		return
+	}
+
+	caser := cases.Title(language.English)
+
+	member := make(map[string]any)
+
+	member["Content"] = res.transformed
+	member["Date"] = res.date
+
+	for k, v := range res.data {
+		keyTitle := caser.String(k)
+		member[keyTitle] = v
+	}
+
+	groupTitle := caser.String(res.group)
+
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	if i.Data == nil {
+		i.Data = make(map[string]any)
+	}
+
+	if _, ok := i.Data[groupTitle]; !ok {
+		i.Data[groupTitle] = []map[string]any{}
+	}
+
+	i.Data[groupTitle] = append(i.Data[groupTitle].([]map[string]any), member)
+}
+
+// newResource creates and initializes a new Resource from the file at filePath.
+func newResource(root, file string) (resource, error) {
+	raw, err := os.ReadFile(file)
+	if err != nil {
+		return resource{}, err
+	}
+
+	ext := filepath.Ext(file)
+	asStr := string(raw)
+
+	dest, err := out(root, file)
+	if err != nil {
+		return resource{}, err
+	}
+
+	res := resource{
+		path:        file,
+		destination: dest,
+		ext:         ext,
+		raw:         asStr,
+	}
 
 	sep := string(filepath.Separator)
-	segments := strings.Split(path, sep)
+	segments := strings.Split(file, sep)
 
-	first := segments[0]
-	file := segments[len(segments)-1]
+	if len(segments) > 3 {
+		parent := filepath.Dir(file)
+		group := filepath.Base(parent)
+		res.group = group
+	}
 
-	var root string
-
-	if config.State.Output != "" {
-		root = filepath.Join(first, config.State.Output)
-	} else {
-		if filepath.IsAbs(path) {
-			wd, err := os.Getwd()
-			if err != nil {
-				panic(err)
-			}
-
-			root = filepath.Join(wd, "build")
-		} else {
-			root = filepath.Join(first, "build")
+	if isComplex(asStr) {
+		rawData, rawBody, err := pull(asStr)
+		if err != nil {
+			return resource{}, fmt.Errorf("unable to carve file: %v", file)
 		}
-	}
 
-	fileSplit := strings.Split(file, ".")
-	fileNoExt := fileSplit[0]
-	if fileNoExt != "index" {
-		result = filepath.Join(root, fileNoExt, "index.html")
+		// TODO: (FEATURE) YAML metadata is assumed here, maybe allow JSON or TOML too.
+		yaml.Unmarshal(
+			[]byte(rawData), &res.data,
+		)
+
+		var buf bytes.Buffer
+		switch ext {
+		case ".md":
+			err = md.Unmarshal([]byte(rawBody), &buf)
+		}
+
+		if err != nil {
+			return resource{}, err
+		}
+
+		res.transformed = template.HTML(strings.TrimSpace(buf.String()))
+
+		if template, ok := res.data["template"]; ok {
+			res.template = template
+			delete(res.data, "template")
+		}
+
+		if date, ok := res.data["date"]; ok {
+			res.date = date
+			delete(res.data, "date")
+		}
 	} else {
-		result = filepath.Join(root, "index.html")
+		res.transformed = template.HTML(asStr)
 	}
 
-	return result
+	return res, nil
+}
+
+// resource represents a file that is being processed as part of a project.
+type resource struct {
+	path        string
+	destination string
+	ext         string
+	raw         string
+	transformed template.HTML
+	rendered    string
+	group       string
+	template    string
+	date        string
+	data        map[string]string
+}
+
+// resourceEvent is a struct passed through channels that may contain a resource.
+type resourceEvent struct {
+	res resource
+	err error
 }

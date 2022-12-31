@@ -1,8 +1,11 @@
 package routine
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
+
+	"github.com/jmkng/onyx/config"
 )
 
 const (
@@ -19,4 +22,25 @@ func WdOrPanic() string {
 	}
 
 	return wd
+}
+
+// Setup will assert that the given path is a valid Onyx project, or return an error
+// that describes what is missing.
+func Setup(path string) error {
+	_, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("cannot access directory: %v", path)
+	}
+
+	configPath, err := config.SearchConf(path)
+	if err != nil {
+		return fmt.Errorf("configuration file onyx.[yaml|yml|json] was not found in directory: %v", path)
+	}
+
+	err = config.Read(configPath)
+	if err != nil {
+		return fmt.Errorf("configuration file `%v`  is malformed", configPath)
+	}
+
+	return nil
 }
