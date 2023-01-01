@@ -1,8 +1,4 @@
 .DS_STORE
 .vscode
-
 build
-project
-plan.excalidraw
-routes
-onyx.yaml
+test

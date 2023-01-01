@@ -582,10 +582,15 @@ func newResource(root, file string) (resource, error) {
 		raw:         asStr,
 	}
 
-	sep := string(filepath.Separator)
-	segments := strings.Split(file, sep)
+	diff, err := diff(root, file)
+	if err != nil {
+		return resource{}, fmt.Errorf("unable to determine relative path to resource: %v", file)
+	}
 
-	if len(segments) > 3 {
+	sep := string(filepath.Separator)
+	segments := strings.Split(diff, sep)
+
+	if len(segments) > 2 {
 		parent := filepath.Dir(file)
 		group := filepath.Base(parent)
 		res.group = group
