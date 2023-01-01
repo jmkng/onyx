@@ -205,6 +205,14 @@ func (routine *Build) Execute() error {
 				templates = append(templates, request)
 			}
 
+			if res.ext == ".tmpl" {
+				var buf bytes.Buffer
+				prerender := template.New("prerender")
+				prerender.Parse(string(res.transformed))
+				prerender.Execute(&buf, injectable.Data)
+				res.transformed = template.HTML(buf.String())
+			}
+
 			context := make(map[string]any)
 			context["Content"] = res.transformed
 
@@ -219,9 +227,11 @@ func (routine *Build) Execute() error {
 
 			tmpl, err := template.ParseFiles(templates...)
 			if err != nil {
+				wrapped := fmt.Errorf("failed to parse templates for resource: %v\n%v", res.path, err)
+
 				renderedChan <- resourceEvent{
 					res: res,
-					err: fmt.Errorf("failed to parse templates for resource: %v", res.path),
+					err: wrapped,
 				}
 
 				return
