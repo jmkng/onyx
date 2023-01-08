@@ -41,7 +41,7 @@ func TestIsIgnored(t *testing.T) {
 		for _, v := range files {
 			ignored := isIgnored(v)
 
-			if !ignored {
+			if ignored == nil {
 				t.Fail()
 			}
 		}
@@ -57,7 +57,7 @@ func TestIsUnknown(t *testing.T) {
 		}
 
 		for _, v := range files {
-			unknown := isUnknown(v)
+			unknown := isUnrecognized(v)
 
 			if unknown {
 				t.Fail()
@@ -66,7 +66,7 @@ func TestIsUnknown(t *testing.T) {
 	})
 
 	t.Run("return true for unrecognized type", func(t *testing.T) {
-		unknown := isUnknown("test.mock")
+		unknown := isUnrecognized("test.mock")
 
 		if !unknown {
 			t.Fail()
@@ -74,7 +74,7 @@ func TestIsUnknown(t *testing.T) {
 	})
 
 	t.Run("return true for missing extension", func(t *testing.T) {
-		unknown := isUnknown("test")
+		unknown := isUnrecognized("test")
 
 		if !unknown {
 			t.Fail()

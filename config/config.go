@@ -42,9 +42,16 @@ type Options struct {
 	Output string `json:"output" yaml:"output"`
 	// Verbose determines how much information is logged.
 	Verbose bool `json:"verbose" yaml:"verbose"`
+	// Ignore provides an obvious way to ignore
+	Ignore ignore `json:"ignore" yaml:"ignore"`
 	// These aren't supported yet, so better comment them out for now.
 	// Domains  []string `json:"domains" yaml:"domains"`
 	// Preserve []string `json:"preserve" yaml:"preserve"`
+}
+
+type ignore struct {
+	Prefix string
+	Suffix string
 }
 
 // SetState will read the file at the given path and unmarshal the contents into

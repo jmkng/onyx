@@ -57,27 +57,34 @@ func (routine *Build) Execute() error {
 
 	_, err = os.Stat(routes)
 	if err != nil {
-		return fmt.Errorf("project has no routes: %v", routine.path)
+		return fmt.Errorf("project has no routes: %v", filepath.Base(routine.path))
 	}
 
 	resourceChan := make(chan resourceEvent)
 
 	resourceCt := 0
 	err = filepath.WalkDir(routes, func(path string, d fs.DirEntry, err error) error {
+		ignored := isIgnored(path)
+
 		if d.IsDir() {
-			if isIgnored(path) {
+			if ignored != nil {
+				if IsVerbose(routine.verbose) {
+					track.Log("directory and all contents have been ignored: %v\n%v", filepath.Base(path), ignored.Error())
+				}
+
 				return filepath.SkipDir
 			}
 
 			return nil
 		}
 
-		if !d.IsDir() && d.Type().IsRegular() && isIgnored(path) {
+		if !d.IsDir() && d.Type().IsRegular() && ignored != nil {
+			track.Log("file has been ignored: %v\n%v", filepath.Base(path), ignored.Error())
 			return nil
 		}
 
-		if isUnknown(path) {
-			if routine.verbose || config.State.Verbose {
+		if isUnrecognized(path) {
+			if IsVerbose(routine.verbose) {
 				track.Log(fmt.Sprintf("skipped unrecognized file: %v", filepath.Base(path)))
 			}
 
@@ -98,7 +105,7 @@ func (routine *Build) Execute() error {
 		return nil
 	})
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("unable to walk directory: %v", filepath.Base(routine.path))
 	}
 
 	var render sync.WaitGroup
@@ -131,20 +138,29 @@ func (routine *Build) Execute() error {
 		}
 
 		for _, v := range group {
-			_, exists := v["Date"]
-			if !exists || v["Date"] == "" {
+			pathString, ok := v["***PATH"].(string)
+			if !ok {
+				panic("failed to assert ***PATH as string")
+			}
+
+			_, dateExists := v["Date"]
+
+			if !dateExists || v["Date"] == "" {
+				if IsVerbose(routine.verbose) {
+					track.Log("resource is missing date: %v", filepath.Base(pathString))
+				}
+
 				continue
 			}
 
-			asString, ok := v["Date"].(string)
+			errDate := fmt.Errorf("invalid date in resource: %v", pathString)
 
-			errDate := fmt.Errorf("invalid date provided to resource: %v", v["///Path"])
-
+			asStr, ok := v["Date"].(string)
 			if !ok {
 				return errDate
 			}
 
-			date, err := time.Parse(config.DateFmt, asString)
+			date, err := time.Parse(config.DateFmt, asStr)
 			if err != nil {
 				return errDate
 			}
@@ -176,8 +192,6 @@ func (routine *Build) Execute() error {
 		toTemplates := filepath.Join(routine.path, "templates")
 		toBase := filepath.Join(toTemplates, "base.tmpl")
 
-		templates := []string{toBase}
-
 		_, err = os.Stat(toBase)
 		if err != nil {
 			return fmt.Errorf("missing base template `base.tmpl` in %v", toTemplates)
@@ -185,20 +199,8 @@ func (routine *Build) Execute() error {
 
 		var base []string
 		err = filepath.WalkDir(toTemplates, func(path string, d fs.DirEntry, err error) error {
-			if isIgnored(path) {
-				if d.IsDir() {
-					return filepath.SkipDir
-				} else {
-					return nil
-				}
-			}
-
 			if d.IsDir() {
-				if path == toTemplates {
-					return nil
-				}
-
-				return filepath.SkipDir
+				return nil
 			}
 
 			if !d.IsDir() && d.Type().IsRegular() {
@@ -221,13 +223,12 @@ func (routine *Build) Execute() error {
 			return nil
 		})
 		if err != nil {
-			panic(err)
+			return fmt.Errorf("unable to walk directory: %v", filepath.Base(toTemplates))
 		}
 
 		caser := cases.Title(language.English)
 
-		templates = append(templates, base...)
-
+		templates := []string{toBase}
 		go func(res resource, out chan resourceEvent) {
 			var request string
 
@@ -287,7 +288,7 @@ func (routine *Build) Execute() error {
 			if err != nil {
 				renderedChan <- resourceEvent{
 					res: resource{},
-					err: fmt.Errorf("encountered a problem while executing template:\n%v", err.Error()),
+					err: fmt.Errorf("encountered a problem while executing template\n%v", err.Error()),
 				}
 				return
 			}
@@ -311,13 +312,9 @@ func (routine *Build) Execute() error {
 
 		_, err = os.Stat(parent)
 		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				err = os.MkdirAll(parent, DefDirPerm)
-				if err != nil {
-					return fmt.Errorf("unable to create directory: %v", parent)
-				}
-			} else {
-				panic(err)
+			err = os.MkdirAll(parent, DefDirPerm)
+			if err != nil {
+				return fmt.Errorf("unable to create directory: %v", parent)
 			}
 		}
 
@@ -331,10 +328,14 @@ func (routine *Build) Execute() error {
 
 	toStatic := filepath.Join(routine.path, "static")
 	err = filepath.WalkDir(toStatic, func(path string, d fs.DirEntry, err error) error {
-		if isIgnored(path) {
+		ignored := isIgnored(path)
+
+		if ignored != nil {
 			if d.IsDir() {
+				track.Log("directory and all contents have been ignored: %v\n%v", filepath.Base(path), ignored.Error())
 				return filepath.SkipDir
 			} else {
+				track.Log("file has been ignored: %v\n%v", filepath.Base(path), ignored.Error())
 				return nil
 			}
 		}
@@ -350,13 +351,13 @@ func (routine *Build) Execute() error {
 		return nil
 	})
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("unable to walk directory: %v", filepath.Base(toStatic))
 	}
 
 	for _, v := range static {
 		dest, err := out(routine.path, v)
 		if err != nil {
-			panic(err)
+			return fmt.Errorf("unable to determine output path for static file: %v\n%v", filepath.Base(v), err.Error())
 		}
 
 		parent := filepath.Dir(dest)
@@ -373,7 +374,7 @@ func (routine *Build) Execute() error {
 
 		err = os.WriteFile(dest, bytes, DefFilePerm)
 		if err != nil {
-			return fmt.Errorf("unable to write file: %v", dest)
+			return fmt.Errorf("unable to write to destination: %v", dest)
 		}
 	}
 
@@ -453,7 +454,7 @@ func out(root, path string) (string, error) {
 	if !filepath.IsAbs(path) {
 		full, err := filepath.Abs(path)
 		if err != nil {
-			return "", errors.New("unable to determine full path to resource")
+			return "", errors.New("unable to determine absolute path")
 		}
 
 		resource = full
@@ -473,7 +474,7 @@ func out(root, path string) (string, error) {
 	// find relative path from project root to resource
 	relative, err := diff(root, resource)
 	if err != nil {
-		return "", errors.New("unable to determine difference path to resource")
+		return "", fmt.Errorf("unable to determine relative path from project root to resource: %v -> %v", filepath.Base(root), filepath.Base(resource))
 	}
 
 	sep := filepath.Separator
@@ -507,27 +508,38 @@ func out(root, path string) (string, error) {
 		return filepath.Join(root, output, relative), nil
 	default:
 		panic(
-			fmt.Sprintf("received call to determine output path for unexpected section in project: %v", segments[0]),
+			fmt.Sprintf("received unexpected section segment: %v", segments[0]),
 		)
 	}
 }
 
-// isIgnored will return true if the path leads to a file that is ignored.
-func isIgnored(path string) bool {
-	result := false
-
+// isIgnored will return an error describing why a file is being ignored, or nil
+// if the file is not ignored.
+func isIgnored(path string) error {
 	base := filepath.Base(path)
 
 	if strings.HasPrefix(base, ".") {
-		result = true
+		return errors.New("ignored due to `.` prefix")
 	}
 
-	return result
+	// Prefix
+	if config.State.Ignore.Prefix != "" &&
+		strings.HasPrefix(base, config.State.Ignore.Prefix) {
+		return fmt.Errorf("ignored due to `%v` prefix", config.State.Ignore.Prefix)
+	}
+
+	// Suffix
+	if config.State.Ignore.Suffix != "" &&
+		strings.HasSuffix(base, config.State.Ignore.Suffix) {
+		return fmt.Errorf("ignored due to `%v` suffix", config.State.Ignore.Suffix)
+	}
+
+	return nil
 }
 
-// isUnknown will return true if the path leads to a file where the extension
+// isUnrecognized will return true if the path leads to a file where the extension
 // is not recognized or does not contain a file extension.
-func isUnknown(path string) bool {
+func isUnrecognized(path string) bool {
 	ext := filepath.Ext(path)
 
 	switch ext {
@@ -624,7 +636,7 @@ func newResource(root, file string, verbose bool) (resource, error) {
 
 	dest, err := out(root, file)
 	if err != nil {
-		return resource{}, err
+		return resource{}, fmt.Errorf("unable to determine output path for resource: %v\n%v", filepath.Base(file), err.Error())
 	}
 
 	res := resource{

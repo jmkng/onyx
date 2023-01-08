@@ -47,3 +47,8 @@ func Setup(path string) error {
 
 	return nil
 }
+
+// IsVerbose will return true if the given bool is true or config.State.Verbose is true.
+func IsVerbose(arg bool) bool {
+	return arg || config.State.Verbose
+}

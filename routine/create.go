@@ -43,6 +43,7 @@ func (routine *Create) Execute() error {
 	if err != nil && errors.Is(err, os.ErrNotExist) && routine.path != "" {
 		mkErr := os.Mkdir(routine.path, DefDirPerm)
 		if mkErr != nil {
+			// TODO: (BUG) If the directory already exists, leave it alone and move on.
 			return fmt.Errorf("failed to create directory: %v", routine.path)
 		}
 
