@@ -5,7 +5,12 @@ import (
 )
 
 func Unmarshal(data []byte, out any) error {
-	return _yaml.Unmarshal(data, out)
+	err := _yaml.Unmarshal(data, out)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func Marshal(data any) ([]byte, error) {

@@ -5,70 +5,59 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"os"
 	"path/filepath"
-
-	"github.com/jmkng/onyx/config"
 )
 
 func NewServe() *Serve {
-	s := &Serve{
+	routine := &Serve{
 		fs: flag.NewFlagSet("serve", flag.ContinueOnError),
 	}
 
-	s.fs.StringVar(&s.path, "path", WdOrPanic(), "Path to the project being served.")
-	s.fs.IntVar(&s.port, "port", 3883, "Port used to host the site.")
+	routine.fs.StringVar(&routine.path, "path", WdOrPanic(), "Path to the project being served.")
+	routine.fs.IntVar(&routine.port, "port", 3883, "Port used to host the site.")
+	routine.fs.BoolVar(&routine.verbose, "verbose", false, "Display more detailed information")
 
-	return s
+	return routine
 }
 
 type Serve struct {
-	fs   *flag.FlagSet
-	path string
-	port int
+	fs      *flag.FlagSet
+	path    string
+	port    int
+	verbose bool
 }
 
-func (s *Serve) Name() string {
-	return s.fs.Name()
+func (routine *Serve) Name() string {
+	return routine.fs.Name()
 }
 
-func (s *Serve) Parse(args []string) error {
-	return s.fs.Parse(args)
+func (routine *Serve) Parse(args []string) error {
+	return routine.fs.Parse(args)
 }
 
-func (s *Serve) Execute() error {
-	err := Setup(s.path)
+func (routine *Serve) Execute() error {
+	err := Setup(routine.path)
 	if err != nil {
 		return err
 	}
 
-	configPath, err := config.SearchConf(s.path)
-	if err != nil {
-		return fmt.Errorf("configuration file onyx.[yaml|yml|json] missing: %v", s.path)
-	}
-
-	err = config.Read(configPath)
-	if err != nil {
-		return fmt.Errorf("configuration file `%v` is malformed", configPath)
-	}
-
-	first := s.port
+	first := routine.port
 	last := 0
 
 	count := 0
 	for {
 		if count > 100 {
-			last = s.port
+			last = routine.port
 			return fmt.Errorf("unable to secure port between %v - %v, please specify with --port`", first, last)
 		}
 
-		ln, err := net.Listen("tcp", fmt.Sprintf(":%v", s.port))
+		ln, err := net.Listen("tcp", fmt.Sprintf(":%v", routine.port))
 		if err != nil {
-			if s.port != 3883 {
-				return fmt.Errorf("requested port `%v` is already in use", s.port)
+			if routine.port != 3883 {
+				return fmt.Errorf("requested port `%v` is already in use", routine.port)
 			}
 
-			s.port++
+			routine.port++
 		} else {
 			ln.Close()
 			break
@@ -77,53 +66,53 @@ func (s *Serve) Execute() error {
 		count++
 	}
 
-	fmt.Printf("serving on http://localhost:%v\n", s.port)
+	fmt.Printf("serving on http://localhost:%v\n", routine.port)
 
-	http.HandleFunc("/", s.handler)
+	http.Handle("/", http.FileServer(
+		http.Dir(
+			filepath.Join(routine.path, "build"),
+		),
+	))
 
-	err = http.ListenAndServe(":"+fmt.Sprint(s.port), nil)
+	err = http.ListenAndServe(":"+fmt.Sprint(routine.port), nil)
 	if err != nil {
-		return fmt.Errorf("failed to host server on http://localhost:%v", s.port)
+		return fmt.Errorf("failed to host server on http://localhost:%v", routine.port)
 	}
 
 	return nil
 }
 
-func (s *Serve) handler(w http.ResponseWriter, req *http.Request) {
-	url := req.URL
-
-	var request string
-
-	var output string
-	if config.State.Output != "" {
-		output = config.State.Output
-	} else {
-		output = "build"
-	}
-
-	ext := filepath.Ext(url.Path)
-	if ext != "" {
-		request = filepath.Join(s.path, output, url.Path)
-	} else {
-		request = filepath.Join(s.path, output, url.Path, "index.html")
-	}
-
-	_, err := os.Stat(request)
-	if err != nil {
-		fmt.Fprint(w, "404")
-		return
-	}
-
-	file, err := os.ReadFile(request)
-	if err != nil {
-		fmt.Fprint(w, "401")
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-
-	// Set status code, content type, etc
-	// write bytes with fmt.Fprintf
-
-	fmt.Fprint(w, string(file))
-}
+// func (routine *Serve) handler(w http.ResponseWriter, req *http.Request) {
+// 	url := req.URL
+//
+// 	var output string
+// 	if config.State.Output != "" {
+// 		output = config.State.Output
+// 	} else {
+// 		output = "build"
+// 	}
+//
+// 	var request string
+// 	ext := filepath.Ext(url.Path)
+// 	if ext != "" {
+// 		request = filepath.Join(routine.path, output, url.Path)
+// 	} else {
+// 		request = filepath.Join(routine.path, output, url.Path, "index.html")
+// 	}
+//
+// 	_, err := os.Stat(request)
+// 	if err != nil {
+// 		fmt.Fprint(w, "404")
+// 		return
+// 	}
+//
+// 	file, err := os.ReadFile(request)
+// 	if err != nil {
+// 		fmt.Fprint(w, "401")
+// 		return
+// 	}
+//
+// 	w.WriteHeader(http.StatusOK)
+//
+// 	fmt.Fprint(w, string(file))
+// }

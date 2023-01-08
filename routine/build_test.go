@@ -1,10 +1,35 @@
 package routine
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/jmkng/onyx/config"
 )
+
+func TestDiff(t *testing.T) {
+	t.Run("result does not contain base of directory", func(t *testing.T) {
+		expected := "one/two/test.md"
+
+		base, err := config.CreateTemp(t, expected)
+		if err != nil {
+			t.Log(err)
+			t.Fail()
+		}
+
+		full := filepath.Join(base, expected)
+
+		diff, err := diff(base, full)
+		if err != nil || diff != expected {
+			t.Logf("expected %v, received %v", expected, diff)
+			t.Fail()
+		}
+
+		fmt.Println(diff)
+	})
+}
 
 func TestIsIgnored(t *testing.T) {
 	t.Run("hidden unix files are ignored", func(t *testing.T) {

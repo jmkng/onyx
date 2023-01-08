@@ -9,8 +9,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/jmkng/onyx/config"
 	"github.com/jmkng/onyx/convert/md"
@@ -26,13 +28,15 @@ func NewBuild() *Build {
 	}
 
 	routine.fs.StringVar(&routine.path, "path", WdOrPanic(), "Path to the project being built.")
+	routine.fs.BoolVar(&routine.verbose, "verbose", false, "Display more detailed information")
 
 	return routine
 }
 
 type Build struct {
-	fs   *flag.FlagSet
-	path string
+	fs      *flag.FlagSet
+	path    string
+	verbose bool
 }
 
 func (routine *Build) Name() string {
@@ -73,15 +77,17 @@ func (routine *Build) Execute() error {
 		}
 
 		if isUnknown(path) {
-			// TODO: (BUG) Log in verbose
-			track.Log(fmt.Sprintf("skipped unknown file: %v", path))
+			if routine.verbose || config.State.Verbose {
+				track.Log(fmt.Sprintf("skipped unrecognized file: %v", filepath.Base(path)))
+			}
+
 			return nil
 		}
 
 		resourceCt++
 
 		go func() {
-			res, err := newResource(routine.path, path)
+			res, err := newResource(routine.path, path, routine.verbose)
 
 			resourceChan <- resourceEvent{
 				res: res,
@@ -117,23 +123,65 @@ func (routine *Build) Execute() error {
 
 	render.Wait()
 
+	for _, v := range injectable.Data {
+		group, ok := v.([]map[string]any)
+
+		if !ok {
+			continue
+		}
+
+		for _, v := range group {
+			_, exists := v["Date"]
+			if !exists || v["Date"] == "" {
+				continue
+			}
+
+			asString, ok := v["Date"].(string)
+
+			errDate := fmt.Errorf("invalid date provided to resource: %v", v["///Path"])
+
+			if !ok {
+				return errDate
+			}
+
+			date, err := time.Parse(config.DateFmt, asString)
+			if err != nil {
+				return errDate
+			}
+
+			v["***DATE"] = date
+		}
+
+		sort.Slice(group, func(i, j int) bool {
+			iDate, ok := group[i]["***DATE"].(time.Time)
+			if !ok {
+				panic("failed to assert ***DATE as time.Time")
+			}
+
+			jDate, ok := group[j]["***DATE"].(time.Time)
+			if !ok {
+				panic("failed to assert ***DATE as time.Time")
+			}
+
+			return iDate.After(jDate)
+		})
+	}
+
 	renderedChan := make(chan resourceEvent)
 	renderedCt := 0
 
 	for i := range renderable {
 		renderedCt++
 
-		var templates []string
-
 		toTemplates := filepath.Join(routine.path, "templates")
 		toBase := filepath.Join(toTemplates, "base.tmpl")
+
+		templates := []string{toBase}
 
 		_, err = os.Stat(toBase)
 		if err != nil {
 			return fmt.Errorf("missing base template `base.tmpl` in %v", toTemplates)
 		}
-
-		templates = append(templates, toBase)
 
 		var base []string
 		err = filepath.WalkDir(toTemplates, func(path string, d fs.DirEntry, err error) error {
@@ -185,10 +233,6 @@ func (routine *Build) Execute() error {
 
 			if res.template != "" {
 				request = filepath.Join(toTemplates, res.template)
-			} else {
-				if res.group != "" {
-					request = filepath.Join(toTemplates, res.group)
-				}
 			}
 
 			if request != "" {
@@ -196,7 +240,7 @@ func (routine *Build) Execute() error {
 				if err != nil {
 					renderedChan <- resourceEvent{
 						res: res,
-						err: fmt.Errorf("unable to locate template `%v` requested by: %v", res.template, res.path),
+						err: fmt.Errorf("unable to locate template `%v` requested by: %v", res.template, filepath.Base(res.path)),
 					}
 
 					return
@@ -214,6 +258,7 @@ func (routine *Build) Execute() error {
 			}
 
 			context := make(map[string]any)
+
 			context["Content"] = res.transformed
 
 			for k, v := range injectable.Data {
@@ -536,8 +581,15 @@ func (i *injectable) absorb(res resource) {
 
 	member := make(map[string]any)
 
+	// hidden keys
+	//
+	// certain keys prefixed with "***" are intended to be used to
+	// provide additional information when handling errors.
+
+	member["***Path"] = res.path
 	member["Content"] = res.transformed
 	member["Date"] = res.date
+	member["Link"] = res.link
 
 	for k, v := range res.data {
 		keyTitle := caser.String(k)
@@ -561,7 +613,7 @@ func (i *injectable) absorb(res resource) {
 }
 
 // newResource creates and initializes a new Resource from the file at filePath.
-func newResource(root, file string) (resource, error) {
+func newResource(root, file string, verbose bool) (resource, error) {
 	raw, err := os.ReadFile(file)
 	if err != nil {
 		return resource{}, err
@@ -582,13 +634,28 @@ func newResource(root, file string) (resource, error) {
 		raw:         asStr,
 	}
 
-	diff, err := diff(root, file)
+	rel, err := diff(root, file)
 	if err != nil {
 		return resource{}, fmt.Errorf("unable to determine relative path to resource: %v", file)
 	}
 
+	var output string
+
+	if config.State.Output != "" {
+		output = config.State.Output
+	} else {
+		output = "build"
+	}
+
+	link, err := diff(filepath.Join(root, output), res.destination)
+	if err != nil {
+		return resource{}, err
+	}
+
+	res.link = ("/" + link)
+
 	sep := string(filepath.Separator)
-	segments := strings.Split(diff, sep)
+	segments := strings.Split(rel, sep)
 
 	if len(segments) > 2 {
 		parent := filepath.Dir(file)
@@ -596,28 +663,21 @@ func newResource(root, file string) (resource, error) {
 		res.group = group
 	}
 
-	if isComplex(asStr) {
-		rawData, rawBody, err := pull(asStr)
+	rawData := ""
+	rawBody := asStr
+
+	complex := isComplex(asStr)
+
+	if complex {
+		rawData, rawBody, err = pull(asStr)
 		if err != nil {
-			return resource{}, fmt.Errorf("unable to carve file: %v", file)
+			return resource{}, fmt.Errorf("unable to pull file: %v", file)
 		}
 
-		// TODO: (FEATURE) YAML metadata is assumed here, maybe allow JSON or TOML too.
+		// TODO: (FEATURE) YAML is assumed, maybe allow JSON or TOML too.
 		yaml.Unmarshal(
 			[]byte(rawData), &res.data,
 		)
-
-		var buf bytes.Buffer
-		switch ext {
-		case ".md":
-			err = md.Unmarshal([]byte(rawBody), &buf)
-		}
-
-		if err != nil {
-			return resource{}, err
-		}
-
-		res.transformed = template.HTML(strings.TrimSpace(buf.String()))
 
 		if template, ok := res.data["template"]; ok {
 			res.template = template
@@ -629,8 +689,28 @@ func newResource(root, file string) (resource, error) {
 			delete(res.data, "date")
 		}
 	} else {
-		res.transformed = template.HTML(asStr)
+		if verbose || config.State.Verbose {
+			track.Log(fmt.Sprintf("found no metadata in file: %v", filepath.Base(file)))
+		}
 	}
+
+	var convertedBody string
+	switch ext {
+	case ".md":
+		var buf bytes.Buffer
+		err = md.Unmarshal([]byte(rawBody), &buf)
+		convertedBody = buf.String()
+	case ".html", ".tmpl":
+		convertedBody = rawBody
+	default:
+		panic("converted unexpected file type")
+	}
+
+	if err != nil {
+		return resource{}, err
+	}
+
+	res.transformed = template.HTML(convertedBody)
 
 	return res, nil
 }
@@ -639,6 +719,7 @@ func newResource(root, file string) (resource, error) {
 type resource struct {
 	path        string
 	destination string
+	link        string
 	ext         string
 	raw         string
 	transformed template.HTML

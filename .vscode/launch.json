@@ -12,6 +12,19 @@
         "--path",
         "test"
       ]
+    },
+    {
+      "name": "build --path test --verbose",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}",
+      "args": [
+        "build",
+        "--path",
+        "test",
+        "--verbose"
+      ]
     }
   ]
 }

@@ -9,12 +9,13 @@ import (
 )
 
 const (
+	// Default permission set for new files.
 	DefFilePerm fs.FileMode = 0644
-	DefDirPerm  fs.FileMode = 0755
+	// Default permission set for new directories.
+	DefDirPerm fs.FileMode = 0755
 )
 
-// WdOrPanic will return the working directory. If the working directory
-// is not available, the program will panic.
+// WdOrPanic will return the working directory, or panic if os.Getwd() fails.
 func WdOrPanic() string {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -24,8 +25,10 @@ func WdOrPanic() string {
 	return wd
 }
 
-// Setup will assert that the given path is a valid Onyx project, or return an error
-// that describes what is missing.
+// Setup will assert that the given path is a valid Onyx project by searching for a
+// recognized configuration file. If one is found, it will be read and stored in
+// config.State. An error is returned if no configuration file exists or the file
+// is malformed.
 func Setup(path string) error {
 	_, err := os.Stat(path)
 	if err != nil {
@@ -37,9 +40,9 @@ func Setup(path string) error {
 		return fmt.Errorf("configuration file onyx.[yaml|yml|json] was not found in directory: %v", path)
 	}
 
-	err = config.Read(configPath)
+	err = config.SetState(configPath)
 	if err != nil {
-		return fmt.Errorf("configuration file `%v`  is malformed", configPath)
+		return fmt.Errorf("configuration file `%v` is malformed", configPath)
 	}
 
 	return nil

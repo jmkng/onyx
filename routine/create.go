@@ -13,47 +13,49 @@ import (
 )
 
 func NewCreate() *Create {
-	c := &Create{
+	routine := &Create{
 		fs: flag.NewFlagSet("create", flag.ContinueOnError),
 	}
 
-	c.fs.StringVar(&c.path, "path", WdOrPanic(), "Path to the desired location of the new project.")
+	routine.fs.StringVar(&routine.path, "path", WdOrPanic(), "Path to the desired location of the new project.")
+	routine.fs.BoolVar(&routine.verbose, "verbose", false, "Display more detailed information")
 
-	return c
+	return routine
 }
 
 type Create struct {
-	fs   *flag.FlagSet
-	path string
+	fs      *flag.FlagSet
+	path    string
+	verbose bool
 }
 
-func (c *Create) Name() string {
-	return c.fs.Name()
+func (routine *Create) Name() string {
+	return routine.fs.Name()
 }
 
-func (c *Create) Parse(args []string) error {
-	return c.fs.Parse(args)
+func (routine *Create) Parse(args []string) error {
+	return routine.fs.Parse(args)
 }
 
-func (c *Create) Execute() error {
-	info, err := os.Stat(c.path)
+func (routine *Create) Execute() error {
+	info, err := os.Stat(routine.path)
 
-	if err != nil && errors.Is(err, os.ErrNotExist) && c.path != "" {
-		mkErr := os.Mkdir(c.path, DefDirPerm)
+	if err != nil && errors.Is(err, os.ErrNotExist) && routine.path != "" {
+		mkErr := os.Mkdir(routine.path, DefDirPerm)
 		if mkErr != nil {
-			return fmt.Errorf("failed to create directory: %v", c.path)
+			return fmt.Errorf("failed to create directory: %v", routine.path)
 		}
 
-		track.Log(fmt.Sprintf("created: %v", c.path))
-	} else if err != nil && c.path != "" {
-		return fmt.Errorf("failed to access directory, check permission: %v", c.path)
+		track.Log(fmt.Sprintf("created: %v", routine.path))
+	} else if err != nil && routine.path != "" {
+		return fmt.Errorf("failed to access directory, check permission: %v", routine.path)
 	}
 
 	if info != nil && !info.IsDir() {
-		return fmt.Errorf("path leads to file, expected path to new location or directory: %v", c.path)
+		return fmt.Errorf("path leads to file, expected path to new location or directory: %v", routine.path)
 	}
 
-	configPath := filepath.Join(c.path, config.YamlName)
+	configPath := filepath.Join(routine.path, config.YamlLongName)
 
 	if _, err := os.Stat(configPath); err == nil {
 		return fmt.Errorf("found existing configuration file, please rename, move or delete: %v", configPath)
@@ -63,14 +65,14 @@ func (c *Create) Execute() error {
 		fmt.Sprintf("created: %v", configPath),
 	)
 
-	toTemplates := filepath.Join(c.path, "templates")
-	toRoutes := filepath.Join(c.path, "routes")
+	toTemplates := filepath.Join(routine.path, "templates")
+	toRoutes := filepath.Join(routine.path, "routes")
 
 	dirs := []string{
 		toTemplates,
 		toRoutes,
-		filepath.Join(c.path, "static"),
-		filepath.Join(c.path, "data"),
+		filepath.Join(routine.path, "static"),
+		filepath.Join(routine.path, "data"),
 	}
 
 	for _, v := range dirs {
