@@ -11,7 +11,7 @@ import (
 
 func TestDiff(t *testing.T) {
 	t.Run("result does not contain base of directory", func(t *testing.T) {
-		expected := "one/two/test.md"
+		expected := filepath.Join("one", "two", "test.md")
 
 		base, err := config.CreateTemp(t, expected)
 		if err != nil {
